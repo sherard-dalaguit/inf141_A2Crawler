@@ -7,7 +7,6 @@ from bs4 import BeautifulSoup
 # global data structures to keep track of information for the required report
 unique_pages = set()
 word_counter = Counter()
-top_50_words = word_counter.most_common(50)
 longest_page = {"url": "", "word_count": 0}
 ics_subdomains = {}
 
@@ -25,55 +24,61 @@ yourself yourselves
 STOP_WORDS = {word.strip() for word in stopwords_str.split() if word.strip() != ""}
 
 
-def scraper(url, resp):
+def scraper(url, resp) -> list[str]:
+    """
+    Main scraper function.
+        - Extracts links from the given response.
+        - Processes page content if the response status is 200 and content-type is HTML.
+    Returns:
+         A list of URLs (strings) extracted from the page that are valid per our domain restrictions.
+    """
     links = extract_next_links(url, resp)
 
-    # to find information needed for report
-    if resp.status == 200:
+    # checks if response is valid HTML before processing the page content
+    content_type = resp.raw_response.headers.get('Content-Type', '').lower()
+    if resp.status == 200 and 'text/html' in content_type:
         process_page(url, resp.raw_response.content)
 
     return [link for link in links if is_valid(link)]
 
 
-def extract_next_links(url, resp):
-    # Implementation required.
-    # url: the URL that was used to get the page
-    # resp.url: the actual url of the page
-    # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there was some kind of problem.
-    # resp.error: when status is not 200, you can check the error here, if needed.
-    # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
-    #         resp.raw_response.url: the url, again
-    #         resp.raw_response.content: the content of the page!
-    # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
+def extract_next_links(url, resp) -> list[str]:
+    """
+    Extracts and defragments URLs from the response content.
+    Returns a list of URLs (strings).
+    """
     links = []
-
     if resp.status != 200:
         return links
 
-    if is_valid(url):
-        soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
+    soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
+    for html_tag in soup.find_all('a', href=True):
+        href = urljoin(url, html_tag['href'])
 
-        for html_tag in soup.find_all('a', href=True):
-            href = urljoin(url, html_tag['href'])
+        # breaking down link into its components
+        parsed_url = urlparse(href)
+        # url without the fragment included
+        new_url = urlunparse((
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            parsed_url.params,
+            parsed_url.query,
+            ""
+        ))
 
-            # breaking down link into its components
-            parsed_url = urlparse(href)
-            # url without the fragment included
-            new_url = urlunparse((
-                parsed_url.scheme,
-                parsed_url.netloc,
-                parsed_url.path,
-                parsed_url.params,
-                parsed_url.query,
-                ""
-            ))
-
-            links.append(new_url)
+        links.append(new_url)
     return links
 
 
-def process_page(url, content):
-    # Extracts the page's text, updates global stats, and records subdomain info if needed
+def process_page(url, content) -> None:
+    """
+    Processes the page content:
+        - Updates the set of unique pages (using defragmented URLs).
+        - Extracts text, tokenizes (removing punctuation and stop words), and updates the word frequency counter.
+        - Updates the longest page information.
+        - Records subdomain information for pages in ics.uci.edu.
+    """
     global longest_page, word_counter, unique_pages, ics_subdomains
 
     parsed_url = urlparse(url)
@@ -107,21 +112,24 @@ def process_page(url, content):
     # based on instructions, i assume that i didn't need to do this for the other domains like stat.uci.edu
     hostname = parsed_url.hostname.lower() if parsed_url.hostname else ""
     if hostname.endswith('ics.uci.edu'):
-        parts = hostname.split('.')
-        if len(parts) == 3:  # subdomain.ics.uci.edu
+        if hostname == "ics.uci.edu":
             subdomain = "ics"
         else:
-            subdomain = parts[0]
-
+            subdomain = hostname[:-len('.ics.uci.edu')]
+            # removes any trailing periods (i.e. 'www.' turns into 'www')
+            if subdomain.endswith('.'):
+                subdomain = subdomain[:-1]
+            if not subdomain:
+                subdomain = "ics"
         if subdomain not in ics_subdomains:
             ics_subdomains[subdomain] = set()
         ics_subdomains[subdomain].add(new_url)
 
 
-def is_valid(url):
-    # Decide whether to crawl this url or not. 
-    # If you decide to crawl it, return True; otherwise return False.
-    # There are already some conditions that return False.
+def is_valid(url) -> bool:
+    """
+    Returns True if the URL is within one of the allowed domains and doesn't point to a disallowed file type.
+    """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -144,3 +152,31 @@ def is_valid(url):
     except TypeError:
         print("TypeError for ", parsed)
         raise
+
+
+def get_top_50_words() -> list[tuple[str, int]]:
+    """
+    Returns a list of tuples for the top 50 most common words and their counts.
+    """
+    return word_counter.most_common(50)
+
+
+def generate_report() -> str:
+    """
+    Generates a report string that includes:
+        - Total unique pages
+        - The longest page (by word count)
+        - The top 50 most common words
+        - Subdomains in ics.uci.edu and the number of unique pages in each.
+    """
+    report_lines = []
+    report_lines.append(f"Total Unique Pages: {len(unique_pages)}")
+    report_lines.append(f"Longest Page (by word count): {longest_page['url']} with {longest_page['word_count']} words")
+    report_lines.append("\nTop 50 Most Common Words:")
+    for word, count in get_top_50_words():
+        report_lines.append(f"{word}: {count}")
+    report_lines.append("\nSubdomains in ics.uci.edu:")
+    for subdomain in sorted(ics_subdomains.keys()):
+        url_prefix = f"http://{subdomain}.ics.uci.edu" if subdomain != "ics" else "http://ics.uci.edu"
+        report_lines.append(f"{url_prefix}, {len(ics_subdomains[subdomain])}")
+    return "\n".join(report_lines)
