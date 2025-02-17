@@ -34,9 +34,7 @@ def scraper(url, resp) -> list[str]:
     """
     links = extract_next_links(url, resp)
 
-    # checks if response is valid HTML before processing the page content
-    content_type = resp.raw_response.headers.get('Content-Type', '').lower()
-    if resp.status == 200 and 'text/html' in content_type:
+    if resp.status == 200:
         process_page(url, resp.raw_response.content)
 
     return [link for link in links if is_valid(link)]
