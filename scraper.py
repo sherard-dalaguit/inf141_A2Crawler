@@ -179,4 +179,11 @@ def generate_report() -> str:
     for subdomain in sorted(ics_subdomains.keys()):
         url_prefix = f"http://{subdomain}.ics.uci.edu" if subdomain != "ics" else "http://ics.uci.edu"
         report_lines.append(f"{url_prefix}, {len(ics_subdomains[subdomain])}")
-    return "\n".join(report_lines)
+
+    report = "\n".join(report_lines)
+
+    # save report to a file
+    with open("report.txt", "w") as file:
+        file.write(report)
+
+    return report
