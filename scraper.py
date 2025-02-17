@@ -40,6 +40,11 @@ def scraper(url, resp) -> list[str]:
     Returns:
          A list of URLs (strings) extracted from the page that are valid per our domain restrictions.
     """
+    # ensure raw_response exists and has headers
+    if not resp.raw_response or not hasattr(resp.raw_response, "headers"):
+        print(f"Skipping {url} because raw_response is missing.")
+        return []
+
     # check if the resp.status indicates a redirect
     if resp.status in (301, 302, 303, 307, 308):
         location = resp.raw_response.headers.get("Location")
