@@ -1,6 +1,7 @@
 import re
 import string
 from collections import Counter
+from hashlib import md5
 from urllib.parse import urlparse, urlunparse, urljoin
 from bs4 import BeautifulSoup
 
@@ -9,6 +10,13 @@ unique_pages = set()
 word_counter = Counter()
 longest_page = {"url": "", "word_count": 0}
 ics_subdomains = {}
+
+# global variables for trap/low-info detection
+MIN_WORD_COUNT = 50  # minimum number of words for a page to be considered "high-information"
+TRAP_THRESHOLD = 3  # number of times a page can be visited before being considered a trap
+page_hash_counter = Counter()
+
+MAX_FILE_SIZE = 1024 * 1024  # 1MB
 
 # this was the default list from www.ranks.nl/stopwords
 stopwords_str = """a about above after again against all am an and any are aren't as at be because been before being
@@ -32,11 +40,38 @@ def scraper(url, resp) -> list[str]:
     Returns:
          A list of URLs (strings) extracted from the page that are valid per our domain restrictions.
     """
+    # check if the resp.status indicates a redirect
+    if resp.status in (301, 302, 303, 307, 308):
+        location = resp.raw_response.headers.get("Location")
+        if location:
+            # convert relative redirect URLs to absolute
+            new_url = urljoin(url, location)
+            return [new_url]
+        # if no location header, we can't follow the redirect
+        return []
+
+    # check to avoid large files
+    content_length = resp.raw_response.headers.get("Content-Length")
+    if content_length and int(content_length) > MAX_FILE_SIZE:
+        print(f"Skipping {url} because file size ({content_length} bytes) exceeds the threshold.")
+        return []
+
+    # ensure that only pages containing textual HTML is processed
+    content_type = resp.raw_response.headers.get("Content-Type", "").lower()
+    if "text/html" not in content_type:
+        return []
+
+    if resp.status != 200:
+        return []
+
+    # process the page and decide if it is "high-information"
+    high_info = process_page(url, resp.raw_response.content)
+
+    # if the page is a trap or low-info, return no links to avoid crawling further
+    if not high_info:
+        return []
+
     links = extract_next_links(url, resp)
-
-    if resp.status == 200:
-        process_page(url, resp.raw_response.content)
-
     return [link for link in links if is_valid(link)]
 
 
@@ -69,15 +104,18 @@ def extract_next_links(url, resp) -> list[str]:
     return links
 
 
-def process_page(url, content) -> None:
+def process_page(url, content) -> bool:
     """
     Processes the page content:
         - Updates the set of unique pages (using defragmented URLs).
         - Extracts text, tokenizes (removing punctuation and stop words), and updates the word frequency counter.
         - Updates the longest page information.
         - Records subdomain information for pages in ics.uci.edu.
+    Returns:
+        True if the page is "high-information".
+        False if it should be considered "low-information" or a trap.
     """
-    global longest_page, word_counter, unique_pages, ics_subdomains
+    global longest_page, word_counter, unique_pages, ics_subdomains, page_hash_counter
 
     parsed_url = urlparse(url)
     new_url = urlunparse((
@@ -97,11 +135,21 @@ def process_page(url, content) -> None:
     translator = str.maketrans('', '', string.punctuation)
     text_clean = text.translate(translator).lower()
 
-    # tokenize & filter out stop words, then update word frequency counter
+    # compute a hash of the cleaned text to detect duplicate (or near-duplicate) pages
+    text_hash = md5(text_clean.encode('utf-8')).hexdigest()
+    page_hash_counter[text_hash] += 1
+
+    # tokenize & filter out stop words, then count words
     words = [word for word in text_clean.split() if word not in STOP_WORDS]
     num_words = len(words)
+
+    # trap/low-info detection if too few words or content seen more than TRAP_THRESHOLD times
+    if num_words < MIN_WORD_COUNT or page_hash_counter[text_hash] > TRAP_THRESHOLD:
+        return False
+
     word_counter.update(words)
 
+    # update longest page information if applicable
     if num_words > longest_page["word_count"]:
         longest_page["word_count"] = num_words
         longest_page["url"] = new_url
@@ -122,6 +170,8 @@ def process_page(url, content) -> None:
         if subdomain not in ics_subdomains:
             ics_subdomains[subdomain] = set()
         ics_subdomains[subdomain].add(new_url)
+
+    return True
 
 
 def is_valid(url) -> bool:
@@ -177,6 +227,18 @@ def generate_report() -> str:
     for subdomain in sorted(ics_subdomains.keys()):
         url_prefix = f"http://{subdomain}.ics.uci.edu" if subdomain != "ics" else "http://ics.uci.edu"
         report_lines.append(f"{url_prefix}, {len(ics_subdomains[subdomain])}")
+
+    report_lines.append("\nDesign Choices and Implementation Details:")
+    report_lines.append("1. Trap/Low-Information Detection:")
+    report_lines.append("   - A page is considered low-information if it contains fewer than 50 words after cleaning and filtering out stop words.")
+    report_lines.append("   - Additionally, I compute an MD5 hash of the cleaned text and track its occurrence. If the same content is encountered more than 3 times,")
+    report_lines.append("     the page is flagged as a trap to prevent crawling duplicate or near-duplicate pages.")
+    report_lines.append("2. Redirect Handling:")
+    report_lines.append("   - When the response status indicates a redirect (301, 302, 303, 307, or 308), the crawler retrieves the 'Location' header,")
+    report_lines.append("     converts any relative URL to an absolute one using urljoin, and follows the redirect.")
+    report_lines.append("3. Large File Avoidance:")
+    report_lines.append("   - The crawler checks the 'Content-Length' header to ensure that files larger than 1MB are skipped.")
+    report_lines.append("   - This helps to focus on HTML pages containing text (Content-Type includes 'text/html') and avoids wasting resources on non-text or large files.")
 
     report = "\n".join(report_lines)
 
