@@ -1,0 +1,82 @@
+Total Unique Pages: 54331
+Longest Page (by word count): https://ics.uci.edu/academics/undergraduate-academic-advising/majorminor_restrictions_chart with 24205 words
+
+Top 50 Most Common Words:
+media: 212687
+files: 173493
+wiki: 161714
+support: 130495
+show: 125352
+june: 107534
+search: 100677
+upload: 92901
+maintenance: 84636
+services: 78537
+software: 73990
+windows: 73347
+linux: 73310
+virtualenvironments: 73247
+hardware: 73241
+labs: 73215
+accounts: 73207
+revisions: 71496
+ics: 70704
+history: 70004
+file: 68420
+network: 57623
+edit: 56269
+security: 54949
+page: 54945
+view: 54782
+projects: 54668
+content: 54329
+skip: 54313
+recent: 54236
+backups: 54214
+courses: 54171
+group: 54162
+requesttracker: 54042
+commands: 54027
+last: 54025
+root: 53997
+icsdc: 53987
+top: 53941
+trace: 53813
+changessitemaplog: 53811
+managerback: 53811
+modified: 53768
+·: 53764
+pageold: 53739
+hans: 53053
+2021: 53035
+name: 53018
+choose: 52962
+namespaces: 52955
+
+Subdomains in ics.uci.edu:
+http://acoi.ics.uci.edu, 75
+http://chenli.ics.uci.edu, 2
+http://evoke.ics.uci.edu, 3
+http://flamingo.ics.uci.edu, 23
+http://fr.ics.uci.edu, 1
+http://ics.uci.edu, 250
+http://ugradforms.ics.uci.edu, 1
+http://wiki.ics.uci.edu, 53812
+http://www.ics.uci.edu, 46
+http://www.informa.ics.uci.edu, 6
+
+Design Choices and Implementation Details:
+1. Trap/Low-Information Detection:
+   - A page is considered low-information if it contains fewer than 50 words after cleaning and filtering out stop words.
+   - Additionally, I compute an MD5 hash of the cleaned text and track its occurrence. If the same content is encountered more than 3 times, the page is flagged as a trap to prevent crawling duplicate or near-duplicate pages.
+2. Redirect Handling:
+   - When the response status indicates a redirect (301, 302, 303, 307, or 308), the crawler retrieves the 'Location' header, converts any relative URL to an absolute one using urljoin, and follows the redirect.
+3. Large File Avoidance:
+   - The crawler checks the 'Content-Length' header to ensure that files larger than 1MB are skipped.
+   - This helps to focus on HTML pages containing text (Content-Type includes 'text/html') and avoids wasting resources on non-text or large files.
+
+Very Important Notes:
+- This "report.txt" was from my first run in the deployment period (excluding the "Design Choices and Implementation Details" portion). My second run had an error and I tried to fix that for my third run, but it ended up not finishing the crawl by February 18, 9:00pm.
+- Since my third run didn't complete in time, a new "report.txt" was not generated.
+- The difference between my first run and third run was that I added logic to detect and avoid traps / low-information pages based on word count and duplicate content hashes. I also handled redirects and excluded large or non-HTML files.
+- This version of scraper.py contains the code I had for my third (yet incomplete) run. If you want to see the code I had during my first run, follow this link https://github.com/sherard-dalaguit/inf141_A2Crawler/tree/f21c8d3a50cdc7faa6f963a8ba311caf34c4cb20
